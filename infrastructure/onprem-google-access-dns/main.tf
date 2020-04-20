@@ -48,9 +48,31 @@ data "google_netblock_ip_ranges" "restricted-googleapis" {
 #                                  Networking                                  #
 ################################################################################
 
+module "vpc-onprem" {
+  source     = "../../modules/net-vpc"
+  project_id = var.project_id_onprem
+  name       = "to-onprem"
+  subnets = {
+    default = {
+      ip_cidr_range      = var.ip_ranges.onprem_project
+      region             = var.region
+      secondary_ip_range = {}
+    }
+  }
+}
+
+module "vpc-onprem-firewall" {
+  source               = "../../modules/net-vpc-firewall"
+  project_id           = var.project_id_onprem
+  network              = module.vpc.name
+  admin_ranges_enabled = true
+  admin_ranges         = values(var.ip_ranges)
+  ssh_source_ranges    = var.ssh_source_ranges
+}
+
 module "vpc" {
   source     = "../../modules/net-vpc"
-  project_id = var.project_id
+  project_id = var.project_id_landing
   name       = "to-onprem"
   subnets = {
     default = {
@@ -63,7 +85,7 @@ module "vpc" {
 
 module "vpc-firewall" {
   source               = "../../modules/net-vpc-firewall"
-  project_id           = var.project_id
+  project_id           = var.project_id_landing
   network              = module.vpc.name
   admin_ranges_enabled = true
   admin_ranges         = values(var.ip_ranges)
@@ -72,7 +94,7 @@ module "vpc-firewall" {
 
 module "vpn" {
   source     = "../../modules/net-vpn-dynamic"
-  project_id = var.project_id
+  project_id = var.project_id_landing
   region     = module.vpc.subnet_regions["default"]
   network    = module.vpc.name
   name       = "to-onprem"
@@ -103,7 +125,7 @@ module "vpn" {
 
 module "nat" {
   source        = "../../modules/net-cloudnat"
-  project_id    = var.project_id
+  project_id    = var.project_id_landing
   region        = module.vpc.subnet_regions.default
   name          = "default"
   router_create = false
@@ -116,7 +138,7 @@ module "nat" {
 
 module "dns-gcp" {
   source          = "../../modules/dns"
-  project_id      = var.project_id
+  project_id      = var.project_id_landing
   type            = "private"
   name            = "gcp-example"
   domain          = "gcp.example.org."
@@ -132,7 +154,7 @@ module "dns-gcp" {
 
 module "dns-api" {
   source          = "../../modules/dns"
-  project_id      = var.project_id
+  project_id      = var.project_id_landing
   type            = "private"
   name            = "googleapis"
   domain          = "googleapis.com."
@@ -146,7 +168,7 @@ module "dns-api" {
 
 module "dns-onprem" {
   source          = "../../modules/dns"
-  project_id      = var.project_id
+  project_id      = var.project_id_landing
   type            = "forwarding"
   name            = "onprem-example"
   domain          = "onprem.example.org."
@@ -156,7 +178,7 @@ module "dns-onprem" {
 
 resource "google_dns_policy" "inbound" {
   provider                  = google-beta
-  project                   = var.project_id
+  project                   = var.project_id_landing
   name                      = "gcp-inbound"
   enable_inbound_forwarding = true
   networks {
@@ -170,10 +192,10 @@ resource "google_dns_policy" "inbound" {
 
 module "service-account-gce" {
   source     = "../../modules/iam-service-accounts"
-  project_id = var.project_id
+  project_id = var.project_id_landing
   names      = ["gce-test"]
   iam_project_roles = {
-    (var.project_id) = [
+    (var.project_id_landing) = [
       "roles/logging.logWriter",
       "roles/monitoring.metricWriter",
     ]
@@ -182,7 +204,7 @@ module "service-account-gce" {
 
 module "vm-test" {
   source     = "../../modules/compute-vm"
-  project_id = var.project_id
+  project_id = var.project_id_landing
   region     = module.vpc.subnet_regions.default
   zone       = "${module.vpc.subnet_regions.default}-b"
   name       = "test"
@@ -222,10 +244,10 @@ module "config-onprem" {
 
 module "service-account-onprem" {
   source     = "../../modules/iam-service-accounts"
-  project_id = var.project_id
+  project_id = var.project_id_onprem
   names      = ["gce-onprem"]
   iam_project_roles = {
-    (var.project_id) = [
+    (var.project_id_onprem) = [
       "roles/compute.viewer",
       "roles/logging.logWriter",
       "roles/monitoring.metricWriter",
@@ -235,7 +257,7 @@ module "service-account-onprem" {
 
 module "vm-onprem" {
   source        = "../../modules/compute-vm"
-  project_id    = var.project_id
+  project_id    = var.project_id_onprem
   region        = var.region
   zone          = "${var.region}-b"
   instance_type = "f1-micro"
@@ -249,8 +271,8 @@ module "vm-onprem" {
     user-data = module.config-onprem.cloud_config
   }
   network_interfaces = [{
-    network    = module.vpc.name
-    subnetwork = module.vpc.subnet_self_links.default
+    network    = module.vpc-onprem.name
+    subnetwork = module.vpc-onprem.subnet_self_links.default
     nat        = true,
     addresses  = null
   }]
@@ -258,3 +280,4 @@ module "vm-onprem" {
   service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   tags                   = ["ssh"]
 }
+

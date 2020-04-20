@@ -43,11 +43,17 @@ variable "ip_ranges" {
   default = {
     gcp    = "10.0.0.0/24"
     onprem = "10.0.16.0/24"
+    onprem_project = "10.0.32.0/24"
   }
 }
 
-variable "project_id" {
-  description = "Project id for all resources."
+variable "project_id_onprem" {
+  description = "Project id for onprem resources."
+  type        = string
+}
+
+variable "project_id_landing" {
+  description = "Project id for landing zones resources."
   type        = string
 }
 
